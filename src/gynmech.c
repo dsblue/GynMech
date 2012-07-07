@@ -16,37 +16,6 @@
 #include "libnerdkits/lcd.h"
 #include "libnerdkits/uart.h"
 
-// PIN DEFINITIONS:
-//
-// PC0 -- temperature sensor analog input
-
-void TIM16_WriteTCNT1( unsigned int i ) {
-  unsigned char sreg;
-
-  /* Save global interrupt flag */
-  sreg = SREG;
-  /* Disable interrupts */
-  cli();
-  /* Set TCNT1 to i */
-  TCNT1 = i;
-  /* Restore global interrupt flag */
-  SREG = sreg;
-}
-
-unsigned int TIM16_ReadTCNT1( void ) {
-  unsigned char sreg;
-  unsigned int i;
-  /* Save global interrupt flag */
-  sreg = SREG;
-  /* Disable interrupts */
-  cli();
-  /* Read TCNT1 into i */
-  i = TCNT1;
-  /* Restore global interrupt flag */
-  SREG = sreg;
-  return i;
-}
-
 void stepper_init() {
 
   DDRB = 0xff;  // Set Port B to Outputs
@@ -58,13 +27,16 @@ void stepper_init() {
 
   TCNT1=0;
 
-  // Turn on PWM
-  TCCR1A |= 1 << 7;
-  TCCR1A |= 1 << 5;
-  
   OCR1A = 0x00ff;
   OCR1B = 0x00ff;
+}
 
+void syringe_on(){
+  TCCR1A |= 1 << 5;
+}
+
+void syringe_off(){
+  TCCR1A &= ~(1 << 5);
 }
 
 void adc_init() {
@@ -122,6 +94,8 @@ int main() {
   // configure the stepper controller
   stepper_init();
 
+  syringe_off();
+  
   // start up the serial port
   uart_init();
   FILE uart_stream = FDEV_SETUP_STREAM(uart_putchar, uart_getchar, _FDEV_SETUP_RW);
@@ -144,7 +118,16 @@ int main() {
       temp_avg = temp_avg + this_temp/100.0;
     }
     
-    
+    // See if there is a command comming in
+    if (uart_char_is_waiting()) {
+      char c = uart_read();
+      if (c=='1') {
+	syringe_on();
+      } else if (c=='0') {
+	syringe_off();
+      }
+    }
+
     // write message to LCD
     lcd_home();
     lcd_write_string(PSTR("ADC: "));
@@ -152,14 +135,10 @@ int main() {
     lcd_write_string(PSTR(" of 1024   "));
     lcd_line_two();
     fprintf_P(&lcd_stream, PSTR("Pressure: %.2f"), temp_avg);
-    //fprintf_P(&lcd_stream, PSTR("Temperature: %.2f"), temp_avg);
-    //lcd_write_data(0xdf);
-    //lcd_write_string(PSTR("F      "));
-    
+
     // write message to serial port
     //printf_P(PSTR("%.2f degrees F\r\n"), temp_avg);
   } 
-
 
   return 0;
 }
