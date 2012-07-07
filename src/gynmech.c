@@ -20,6 +20,53 @@
 //
 // PC0 -- temperature sensor analog input
 
+void TIM16_WriteTCNT1( unsigned int i ) {
+  unsigned char sreg;
+
+  /* Save global interrupt flag */
+  sreg = SREG;
+  /* Disable interrupts */
+  cli();
+  /* Set TCNT1 to i */
+  TCNT1 = i;
+  /* Restore global interrupt flag */
+  SREG = sreg;
+}
+
+unsigned int TIM16_ReadTCNT1( void ) {
+  unsigned char sreg;
+  unsigned int i;
+  /* Save global interrupt flag */
+  sreg = SREG;
+  /* Disable interrupts */
+  cli();
+  /* Read TCNT1 into i */
+  i = TCNT1;
+  /* Restore global interrupt flag */
+  SREG = sreg;
+  return i;
+}
+
+void stepper_init() {
+
+  DDRB = 0xff;  // Set Port B to Outputs
+  PORTB = 0x00;
+
+  // Must set DDR Direction on the PWM pin
+  TCCR1A = 0b00000011; // OC1A Disconnected, OC1B = 
+  TCCR1B = 0b00000011; // WGM=CTC, Prescale = 64
+
+  TCNT1=0;
+
+  // Turn on PWM
+  TCCR1A |= 1 << 7;
+  TCCR1A |= 1 << 5;
+  
+  OCR1A = 0x00ff;
+  OCR1B = 0x00ff;
+
+}
+
 void adc_init() {
   // set analog to digital converter
   // for external reference (5v), single ended input ADC0
@@ -71,6 +118,9 @@ int main() {
 
   // start up the Analog to Digital Converter
   adc_init();  
+  
+  // configure the stepper controller
+  stepper_init();
 
   // start up the serial port
   uart_init();
