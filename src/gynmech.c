@@ -16,6 +16,9 @@
 #include "libnerdkits/lcd.h"
 #include "libnerdkits/uart.h"
 
+FILE lcd_stream;
+FILE uart_stream;
+
 void stepper_init() {
 
   DDRB = 0xff;  // Set Port B to Outputs
@@ -74,18 +77,82 @@ uint16_t adc_read() {
   return result;
 }
 
-double sampleToFahrenheit(uint16_t sample) {
-  // conversion ratio in DEGREES/STEP:
-  // (5000 mV / 1024 steps) * (1 degree / 10mV)
-  //	^^^^^^^^^^^		 ^^^^^^^^^^
-  //     from ADC		  from LM34
-  return sample * (5000.0 / 1024.0 / 10.0);  
+enum {
+  COMMAND_SET_ZERO,
+  COMMAND_SET_STOP_PRESURE,
+  COMMAND_INFLATE
+};
+
+enum state {
+  STATE_IDLE,
+  STATE_RECV,
+  STATE_INFLATE
+} current_state;
+
+void poll(){
+  // Main polling loop
+  
+  // Check for a character from the USART
+  // See if there is a command comming in
+  if (uart_char_is_waiting()) {
+    char c = uart_read();
+
+    // Update the command state-machine
+    if (c=='1') {
+      current_state = STATE_INFLATE;
+      syringe_on();
+    } else if (c=='0') {
+      current_state = STATE_IDLE;
+      syringe_off();
+    }
+    // Handle a new command if it exists
+    // Commands = Set Presure 0-point
+    //
+
+
+  }
+  
+  // Check the current pressure
+  // take 100 samples and average them!
+  // holder variables for temperature data
+  uint16_t last_sample = 0;
+  double this_temp;
+  double pres_avg = 0.0;
+  uint8_t i;
+  
+  for(i=0; i<100; i++) {
+    last_sample = adc_read();
+    //this_temp = sampleTokPi(last_sample);
+    this_temp = last_sample;
+    
+    // add this contribution to the average
+    pres_avg = pres_avg + this_temp/100.0;
+  }
+
+  // write message to LCD
+  lcd_home();
+  lcd_write_string(PSTR("ADC: "));
+  lcd_write_int16(last_sample);
+  lcd_write_string(PSTR(" of 1024   "));
+  lcd_line_two();
+  if ( current_state == STATE_IDLE ) {
+    fprintf_P(&lcd_stream, PSTR("State: Idle      "));
+  } else if ( current_state == STATE_RECV ) {
+    fprintf_P(&lcd_stream, PSTR("State: Recv      "));
+  } else if ( current_state == STATE_INFLATE ) {
+    fprintf_P(&lcd_stream, PSTR("State: Inflate   "));
+  }
+
+  // write message to serial port
+  //printf_P(PSTR("%.2f degrees F\r\n"), temp_avg);
+
 }
+
 
 int main() {
   // start up the LCD
   lcd_init();
-  FILE lcd_stream = FDEV_SETUP_STREAM(lcd_putchar, 0, _FDEV_SETUP_WRITE);
+  fdev_setup_stream(&lcd_stream, lcd_putchar, 0, _FDEV_SETUP_WRITE);
   lcd_home();
 
   // start up the Analog to Digital Converter
@@ -93,51 +160,18 @@ int main() {
   
   // configure the stepper controller
   stepper_init();
-
   syringe_off();
   
   // start up the serial port
   uart_init();
-  FILE uart_stream = FDEV_SETUP_STREAM(uart_putchar, uart_getchar, _FDEV_SETUP_RW);
+  fdev_setup_stream(&uart_stream, uart_putchar, uart_getchar, _FDEV_SETUP_RW);
   stdin = stdout = &uart_stream;
 
-  // holder variables for temperature data
-  uint16_t last_sample = 0;
-  double this_temp;
-  double temp_avg;
-  uint8_t i;
-  
-  while(1) {
-    // take 100 samples and average them!
-    temp_avg = 0.0;
-    for(i=0; i<100; i++) {
-      last_sample = adc_read();
-      this_temp = sampleToFahrenheit(last_sample);
+  // Initialize state machine
+  current_state = STATE_IDLE;
 
-      // add this contribution to the average
-      temp_avg = temp_avg + this_temp/100.0;
-    }
-    
-    // See if there is a command comming in
-    if (uart_char_is_waiting()) {
-      char c = uart_read();
-      if (c=='1') {
-	syringe_on();
-      } else if (c=='0') {
-	syringe_off();
-      }
-    }
-
-    // write message to LCD
-    lcd_home();
-    lcd_write_string(PSTR("ADC: "));
-    lcd_write_int16(last_sample);
-    lcd_write_string(PSTR(" of 1024   "));
-    lcd_line_two();
-    fprintf_P(&lcd_stream, PSTR("Pressure: %.2f"), temp_avg);
-
-    // write message to serial port
-    //printf_P(PSTR("%.2f degrees F\r\n"), temp_avg);
+  while(1) {    
+    poll();
   } 
 
   return 0;
