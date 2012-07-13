@@ -19,10 +19,18 @@
 FILE lcd_stream;
 FILE uart_stream;
 
+// PC1 = Pump Direction
+enum { 
+  PUMP_DIR_PIN = 1 
+};
+
 void stepper_init() {
 
   DDRB = 0xff;  // Set Port B to Outputs
   PORTB = 0x00;
+
+  DDRC  |=  (1U << PUMP_DIR_PIN);  // Set PIN PC1 to Output GPIO (Motor Direction)
+  PORTC &= ~(1U << PUMP_DIR_PIN);
 
   // Must set DDR Direction on the PWM pin
   TCCR1A = 0b00000011; // OC1A Disconnected, OC1B = 
@@ -34,7 +42,13 @@ void stepper_init() {
   OCR1B = 0x00ff;
 }
 
-void syringe_on(){
+void syringe_inflate(){  
+  PORTC &= ~(1U << PUMP_DIR_PIN);
+  TCCR1A |= 1 << 5;
+}
+
+void syringe_deflate(){  
+  PORTC |= (1U << PUMP_DIR_PIN);
   TCCR1A |= 1 << 5;
 }
 
@@ -80,13 +94,15 @@ uint16_t adc_read() {
 enum {
   COMMAND_SET_ZERO,
   COMMAND_SET_STOP_PRESURE,
-  COMMAND_INFLATE
+  COMMAND_INFLATE,
+  COMMAND_DEFLATE
 };
 
 enum state {
   STATE_IDLE,
   STATE_RECV,
-  STATE_INFLATE
+  STATE_INFLATE,
+  STATE_DEFLATE
 } current_state;
 
 void poll(){
@@ -100,15 +116,15 @@ void poll(){
     // Update the command state-machine
     if (c=='1') {
       current_state = STATE_INFLATE;
-      syringe_on();
+      syringe_inflate();
     } else if (c=='0') {
       current_state = STATE_IDLE;
-      syringe_off();
+      syringe_deflate();
     }
     // Handle a new command if it exists
     // Commands = Set Presure 0-point
     //
-
+    
 
   }
   
@@ -141,6 +157,8 @@ void poll(){
     fprintf_P(&lcd_stream, PSTR("State: Recv      "));
   } else if ( current_state == STATE_INFLATE ) {
     fprintf_P(&lcd_stream, PSTR("State: Inflate   "));
+  } else if ( current_state == STATE_DEFLATE ) {
+    fprintf_P(&lcd_stream, PSTR("State: Deflate   "));
   }
 
   // write message to serial port
