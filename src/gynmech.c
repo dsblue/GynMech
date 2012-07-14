@@ -91,19 +91,33 @@ uint16_t adc_read() {
   return result;
 }
 
-enum {
-  COMMAND_SET_ZERO,
-  COMMAND_SET_STOP_PRESURE,
-  COMMAND_INFLATE,
-  COMMAND_DEFLATE
-};
-
 enum state {
   STATE_IDLE,
   STATE_RECV,
   STATE_INFLATE,
   STATE_DEFLATE
 } current_state;
+
+enum {
+  COMMAND_NONE,
+  COMMAND_SET_ZERO,
+  COMMAND_SET_PRESSURE,
+  COMMAND_INFLATE,
+  COMMAND_DEFLATE
+} current_command;
+
+#define MAX_VALUE_LENGTH         8
+
+enum commandState {
+  CMD_STATE_COMMAND,
+  CMD_STATE_EQUAL,
+  CMD_STATE_VALUE  
+} current_command_state;
+
+char value_str[MAX_VALUE_LENGTH];
+int value_str_i;
+
+int target_pressure;
 
 void poll(){
   // Main polling loop
@@ -112,20 +126,54 @@ void poll(){
   // See if there is a command comming in
   if (uart_char_is_waiting()) {
     char c = uart_read();
-
-    // Update the command state-machine
-    if (c=='1') {
-      current_state = STATE_INFLATE;
-      syringe_inflate();
-    } else if (c=='0') {
-      current_state = STATE_IDLE;
-      syringe_deflate();
-    }
-    // Handle a new command if it exists
-    // Commands = Set Presure 0-point
-    //
     
-
+    // Update the command state-machine
+    if (c == '\n' || c == '\r' ) {
+      // End of a command, process it and reset the command string
+      if (current_command == COMMAND_NONE) {
+      } else if (current_command == COMMAND_INFLATE) {
+	syringe_inflate();
+	current_state = STATE_INFLATE;
+      } else if (current_command == COMMAND_DEFLATE) {
+	syringe_deflate();
+	current_state = STATE_DEFLATE;
+      } else if (current_command == COMMAND_SET_PRESSURE) {
+	int ret = sscanf_P(value_str, PSTR("%d"), &target_pressure);
+	//	printf_P(PSTR("1 = %d\r\n"), ret );  
+	//	printf_P(PSTR("2 = %d\r\n"), target_pressure );
+      }
+      value_str_i = 0;
+      current_command = COMMAND_NONE;
+      current_command_state = CMD_STATE_COMMAND;
+    } else {
+      // In a command string
+      if (current_command_state == CMD_STATE_COMMAND) {
+	// Command character
+	if (c == 'i') {
+	  // Inflate
+	  current_command = COMMAND_INFLATE;
+	} else if (c == 'd') {
+	  // Deflate
+	  current_command = COMMAND_DEFLATE;
+	} else if (c == 'p') {
+	  // Set pressure point
+	  current_command = COMMAND_SET_PRESSURE;
+	} else {
+	  current_command = COMMAND_NONE;
+	}
+	current_command_state = CMD_STATE_EQUAL;
+      } else if (current_command_state == CMD_STATE_EQUAL) {
+	// Assume the second char is always '='
+	current_command_state = CMD_STATE_VALUE;
+      } else if (current_command_state == CMD_STATE_VALUE) {
+	// In value part of command
+	value_str[value_str_i++] = c;
+	if (value_str_i >= MAX_VALUE_LENGTH) {
+	  value_str_i = MAX_VALUE_LENGTH-1;
+	}
+	value_str[value_str_i] = 0; // Write NULL terminator
+      }
+    }
   }
   
   // Check the current pressure
@@ -145,6 +193,21 @@ void poll(){
     pres_avg = pres_avg + this_temp/100.0;
   }
 
+  // Check to see if we hit the target presure
+  if ( current_state == STATE_INFLATE ) {
+    if ( pres_avg >= target_pressure ) {
+      // Stop Inflating
+      syringe_off();
+      current_state = STATE_IDLE;
+    }
+  } else if ( current_state == STATE_DEFLATE ) {
+    if ( pres_avg <= target_pressure ) {
+      // Stop Deflating
+      syringe_off();
+      current_state = STATE_IDLE;      
+    }
+  }   
+
   // write message to LCD
   lcd_home();
   lcd_write_string(PSTR("ADC: "));
@@ -160,9 +223,12 @@ void poll(){
   } else if ( current_state == STATE_DEFLATE ) {
     fprintf_P(&lcd_stream, PSTR("State: Deflate   "));
   }
-
+  lcd_line_three();
+  fprintf_P(&lcd_stream, PSTR("Target Pres: %d"), target_pressure );
   // write message to serial port
   //printf_P(PSTR("%.2f degrees F\r\n"), temp_avg);
+  //printf_P(PSTR("Pres = %d\r\n"), target_pressure );
+  //printf_P(PSTR("Value = %s\r\n"), value_str );
 
 }
 
@@ -187,6 +253,10 @@ int main() {
 
   // Initialize state machine
   current_state = STATE_IDLE;
+  current_command = COMMAND_NONE;
+  current_command_state = CMD_STATE_COMMAND;
+  value_str_i = 0;
+  target_pressure = 512;
 
   while(1) {    
     poll();
