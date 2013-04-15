@@ -1,7 +1,3 @@
-// tempsensor.c
-// for NerdKits with ATmega168
-// mrobbins@mit.edu
-
 #define F_CPU 14745600
 
 #include <stdio.h>
